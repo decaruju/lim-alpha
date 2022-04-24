@@ -1,0 +1,5 @@
+old_print = print
+print = () {
+  old_print('gotcha')
+}
+print(2)
