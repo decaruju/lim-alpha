@@ -63,12 +63,6 @@ class LimCode(Code):
     def __call__(self, *args, **kwargs):
         return self.function(*args, **kwargs)
 
-function_prototype = {
-}
-
-def lim_print(obj, scope):
-    return build_lim_obj(obj.fields['$string'](obj), scope)
-
 binops = {
     '+': '$add',
     '-': '$sub',
@@ -131,8 +125,6 @@ class Scope:
             '$setitem': self.build_native_function(lambda x, y, z: x.value.__setitem__(y, z)),
             '$delitem': self.build_native_function(lambda x, y: x.value.__delitem__(y)),
         }
-        self.builtins["Function"].prototype = function_prototype
-
 
     def __getitem__(self, name):
         return self.builtins.get(name) or self.file_scope.get(name) or self.function_scope.get(name)
@@ -150,23 +142,8 @@ class Program:
         self.scope = Scope()
         self.scope.builtins["print"] = LimFunction(NativeCode(self.print), self.scope["Function"])
 
-    def run(self):
-        self.scope['three'] = self.build_lim_obj(3)
-        self.scope['four']= self.build_lim_obj(4)
-        self.scope['seven'] = self.binop(self.scope['three'], self.scope['four'], '/')
-        self.scope['array'] = self.build_lim_obj([1, 2, 3])
-        self.getfield(self.scope['array'], "push")(self.scope['four'])
-        self.scope['print'](self.scope['seven'])
-        self.scope['print'](self.scope['array'])
-        self.scope['print'](self.getitem(self.scope['array'], self.scope['three']))
-        self.scope['dictionary'] = self.build_lim_obj({'a': 1, 3: 'b'})
-        self.scope['print'](self.scope['dictionary'])
-        self.setitem(self.scope['dictionary'], self.scope['four'], self.scope['seven'])
-        self.scope['print'](self.getitem(self.scope['dictionary'], self.scope['four']))
-        self.scope['print'](self.scope['dictionary'])
-        self.delitem(self.scope['dictionary'], self.scope['three'])
-        self.scope['print'](self.scope['dictionary'])
-        # self.scope['Obj'] = LimClass("Obj", self.scope[''])
+    def run(self, ast):
+        return self.stmt(ast)
 
     def binop(self, lhs, rhs, op):
         return self.build_lim_obj(self.getfield(lhs, binops[op])(rhs))
@@ -208,5 +185,222 @@ class Program:
         print(self.to_string(arg).value)
         return arg
 
+    def parse_argument_list(self, argument_list):
+        if len(argument_list) > 2:
+            return [self.expr(argument_list[1]), *self.parse_argument_list(argument_list[2])]
+        else:
+            return [self.expr(argument_list[1])]
+
+    def expr(self, ast):
+        if ast[0] == 'binop':
+            return self.binop(self.expr(ast[2]), self.expr(ast[3]), ast[1])
+        elif ast[0] == 'number':
+            return self.build_lim_obj(ast[1])
+        elif ast[0] == 'name':
+            return self.scope[ast[1]]
+        elif ast[0] == 'grouped':
+            return self.expr(ast[1])
+        elif ast[0] == 'assign':
+            value = self.expr(ast[3])
+            self.scope[ast[1]] = value
+            return value
+        elif ast[0] == 'call_expression':
+            arguments = self.parse_argument_list(ast[2])
+            return self.scope[ast[1]](*arguments)
+        elif ast[0] == 'string':
+            return self.build_lim_obj(ast[1])
+        else:
+            raise ValueError(f"Unknown expression {ast[0]}")
+
+    def stmt(self, ast):
+        if ast[0] == 'program':
+            return self.stmt(ast[1])
+        elif ast[0] == 'statement_list':
+            value = self.stmt(ast[1])
+            if len(ast) > 2:
+                value = self.stmt(ast[2])
+            return value
+        elif ast[0] == 'expression':
+            return self.expr(ast[1])
+        else:
+            print(ast)
+            raise ValueError(f"Unknown statement {ast[0]}")
+
+from pprint import pprint
+from ply.lex import lex
+from ply.yacc import yacc
+
+# All tokens must be named in advance.
+tokens = ( 'PLUS', 'MINUS', 'TIMES', 'DIVIDE', 'LPAREN', 'RPAREN',
+           'NAME', 'NUMBER', 'ASSIGN', 'NEWLINE', 'COMMA', 'STRINGLITERAL')
+
+# Ignored characters
+t_ignore = ' \t'
+
+# Token matching rules are written as regexs
+t_ASSIGN = r'\='
+t_PLUS = r'\+'
+t_COMMA = r','
+t_MINUS = r'-'
+t_TIMES = r'\*'
+t_DIVIDE = r'/'
+t_LPAREN = r'\('
+t_RPAREN = r'\)'
+t_NAME = r'[a-zA-Z_][a-zA-Z0-9_]*'
+
+# A function can be used if there is an associated action.
+# Write the matching regex in the docstring.
+def t_NUMBER(t):
+    r'(\d+\.\d+)|(\d+)'
+    if '.' in t.value:
+        t.value = float(t.value)
+    else:
+        t.value = int(t.value)
+    return t
+
+def t_STRINGLITERAL(t):
+    r'(\'.+\')|(".+")'
+    t.value = t.value[1:-1]
+    return t
+
+def t_NEWLINE(t):
+    r'\n+'
+    t.lexer.lineno += t.value.count('\n')
+    return t
+
+# Error handler for illegal characters
+def t_error(t):
+    print(f'Illegal character {t.value[0]!r}')
+    t.lexer.skip(1)
+
+# Build the lexer object
+lexer = lex()
+    
+# --- Parser
+
+def p_program(p):
+    '''
+    program : statement_list
+    '''
+    p[0] = ('program', p[1])
+
+def p_statement_list_1(p):
+    '''
+    statement_list : statement
+    '''
+    p[0] = ('statement_list', p[1])
+
+def p_statement_list_2(p):
+    '''
+    statement_list : statement NEWLINE statement_list
+    '''
+    p[0] = ('statement_list', p[1], p[3])
+
+def p_statement_expression(p):
+    '''
+    statement : expression
+    '''
+    p[0] = ('expression', p[1])
+
+def p_assign_expression(p):
+    '''
+    expression : NAME ASSIGN expression
+    '''
+    p[0] = ('assign', p[1], p[2], p[3])
+
+def p_call_expression(p):
+    '''
+    expression : NAME LPAREN argument_list RPAREN
+    '''
+    p[0] = ('call_expression', p[1], p[3])
+
+def p_argument_list_empty(p):
+    '''
+    argument_list :
+    '''
+
+def p_argument_list_1(p):
+    '''
+    argument_list : expression
+    '''
+    p[0] = ('argument_list', p[1])
+
+def p_argument_list_2(p):
+    '''
+    argument_list : expression COMMA argument_list
+    '''
+    p[0] = ('argument_list', p[1], p[3])
+
+
+def p_expression(p):
+    '''
+    expression : term PLUS term
+               | term MINUS term
+    '''
+    p[0] = ('binop', p[2], p[1], p[3])
+
+def p_expression_term(p):
+    '''
+    expression : term
+    '''
+    p[0] = p[1]
+
+def p_term(p):
+    '''
+    term : factor TIMES factor
+         | factor DIVIDE factor
+    '''
+    p[0] = ('binop', p[2], p[1], p[3])
+
+def p_term_factor(p):
+    '''
+    term : factor
+    '''
+    p[0] = p[1]
+
+def p_factor_number(p):
+    '''
+    factor : NUMBER
+    '''
+    p[0] = ('number', p[1])
+
+def p_factor_string(p):
+    '''
+    factor : STRINGLITERAL
+    '''
+    p[0] = ('string', p[1])
+
+def p_factor_name(p):
+    '''
+    factor : NAME
+    '''
+    p[0] = ('name', p[1])
+
+def p_factor_unary(p):
+    '''
+    factor : PLUS factor
+           | MINUS factor
+    '''
+    p[0] = ('unary', p[1], p[2])
+
+def p_factor_grouped(p):
+    '''
+    factor : LPAREN expression RPAREN
+    '''
+    p[0] = ('grouped', p[2])
+
+def p_error(p):
+    print(p)
+    print(f'Syntax error at {p.value!r}')
+
+# Build the parser
+parser = yacc()
+
+# Parse an expression
+ast = parser.parse('''x = "foo"
+y = 'bar'
+print(2.2+2*(2+2))
+print('foo')''')
+
 program = Program()
-program.run()
+program.run(ast)
