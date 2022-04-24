@@ -112,6 +112,11 @@ class Scope:
     def build_native_function(self, fn):
         return LimFunction(NativeCode(lambda *arg: self.program.build_lim_obj(fn(*arg))), self.builtins["Function"])
 
+    def array_to_string(self, array):
+        elements = ', '.join([item.fields["$string"](item).value for item in array.value])
+        return f'[{elements}]'
+
+
     def build_prototypes(self):
         self.builtins["Number"].prototype = {
             '$add': self.build_native_function(lambda x, y: x.value+y.value),
@@ -123,7 +128,7 @@ class Scope:
         self.builtins["Integer"].prototype = self.builtins["Number"].prototype
         self.builtins["Float"].prototype = self.builtins["Number"].prototype
         self.builtins["Array"].prototype = {
-            '$string': self.build_native_function(lambda x: str([item.fields["$string"](item) for item in x.value])),
+            '$string': self.build_native_function(self.array_to_string),
             'push': self.build_native_function(lambda x, y: x.value.append(y)),
             '$getitem': self.build_native_function(lambda x, y: x.value[y.value]),
         }
@@ -175,10 +180,12 @@ class Program:
         if isinstance(obj, str):
             return self.scope["String"].instanciate(obj)
         if isinstance(obj, list):
-            return self.scope["Array"].instanciate([self.build_lim_obj(x) for x in obj])
+            return self.scope["Array"].instanciate(obj)
         if isinstance(obj, dict):
             return self.scope["Dictionary"].instanciate({self.build_lim_obj(key): self.build_lim_obj(value) for key, value in obj.items() })
-        raise ValueError(obj)
+        if isinstance(obj, LimObj):
+            return obj
+        raise ValueError(f'Cannot build lim object {obj}')
 
     def getitem(self, obj, key):
         return self.getfield(obj, "$getitem")(key)
@@ -210,6 +217,15 @@ class Program:
         else:
             return [self.expr(argument_list[1])]
 
+    def build_array(self, ast):
+        if len(ast) == 1:
+            return []
+        elif len(ast) == 2:
+            return [self.expr(ast[1])]
+        else:
+            return [self.expr(ast[1]), *self.build_array(ast[2])]
+
+
     def expr(self, ast):
         if ast[0] == 'binop':
             return self.binop(self.expr(ast[2]), self.expr(ast[3]), ast[1])
@@ -230,8 +246,14 @@ class Program:
             return self.build_lim_obj(ast[1])
         elif ast[0] == 'access':
             return self.getfield(self.expr(ast[1]), ast[2])
+        elif ast[0] == 'index':
+            return self.getfield(self.expr(ast[1]), '$getitem')(self.expr(ast[2]))
         elif ast[0] == 'function_definition':
             return LimFunction(LimCode(ast[1], self), self.scope["Function"])
+        elif ast[0] == 'array_expression':
+            return self.build_lim_obj(self.expr(ast[1]))
+        elif ast[0] == 'array_content':
+            return self.build_array(ast)
         else:
             raise ValueError(f"Unknown expression {ast[0]}")
 
