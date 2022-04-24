@@ -74,7 +74,8 @@ binops = {
 }
 
 class Scope:
-    def __init__(self):
+    def __init__(self, program):
+        self.program = program
         self.builtins = {}
         self.file_scope = {}
         self.function_scope = {}
@@ -102,7 +103,7 @@ class Scope:
         self.build_prototypes()
 
     def build_native_function(self, fn):
-        return LimFunction(NativeCode(fn), self.builtins["Function"])
+        return LimFunction(NativeCode(lambda *arg: self.program.build_lim_obj(fn(*arg))), self.builtins["Function"])
 
     def build_prototypes(self):
         self.builtins["Number"].prototype = {
@@ -142,14 +143,14 @@ class Scope:
 
 class Program:
     def __init__(self):
-        self.scope = Scope()
+        self.scope = Scope(self)
         self.scope.builtins["print"] = LimFunction(NativeCode(self.print), self.scope["Function"])
 
     def run(self, ast):
         return self.stmt(ast)
 
     def binop(self, lhs, rhs, op):
-        return self.build_lim_obj(self.getfield(lhs, binops[op])(rhs))
+        return self.getfield(lhs, binops[op])(rhs)
 
     def build_lim_obj(self, obj):
         if isinstance(obj, int):
@@ -162,7 +163,7 @@ class Program:
             return self.scope["Array"].instanciate([self.build_lim_obj(x) for x in obj])
         if isinstance(obj, dict):
             return self.scope["Dictionary"].instanciate({self.build_lim_obj(key): self.build_lim_obj(value) for key, value in obj.items() })
-        raise ValueError()
+        raise ValueError(obj)
 
     def getitem(self, obj, key):
         return self.getfield(obj, "$getitem")(key)
@@ -182,7 +183,7 @@ class Program:
         return field
 
     def to_string(self, obj):
-        return self.build_lim_obj(self.getfield(obj, "$string")())
+        return self.getfield(obj, "$string")()
 
     def print(self, arg):
         print(self.to_string(arg).value)
@@ -208,10 +209,12 @@ class Program:
             self.scope[ast[1]] = value
             return value
         elif ast[0] == 'call_expression':
-            arguments = self.parse_argument_list(ast[2])
-            return self.scope[ast[1]](*arguments)
+            arguments = self.parse_argument_list(ast[2]) if ast[2] else []
+            return self.expr(ast[1])(*arguments)
         elif ast[0] == 'string':
             return self.build_lim_obj(ast[1])
+        elif ast[0] == 'access':
+            return self.getfield(self.expr(ast[1]), ast[2])
         else:
             raise ValueError(f"Unknown expression {ast[0]}")
 

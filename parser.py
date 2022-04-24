@@ -2,7 +2,9 @@ from ply.lex import lex
 from ply.yacc import yacc
 
 tokens = ( 'PLUS', 'MINUS', 'TIMES', 'DIVIDE', 'LPAREN', 'RPAREN',
-           'NAME', 'NUMBER', 'ASSIGN', 'NEWLINE', 'COMMA', 'STRINGLITERAL')
+           'NAME', 'NUMBER', 'ASSIGN', 'NEWLINE', 'COMMA', 'STRINGLITERAL',
+           'PERIOD'
+          )
 
 # Ignored characters
 t_ignore = ' \t'
@@ -10,13 +12,14 @@ t_ignore = ' \t'
 # Token matching rules are written as regexs
 t_ASSIGN = r'\='
 t_PLUS = r'\+'
+t_PERIOD = r'\.'
 t_COMMA = r','
 t_MINUS = r'-'
 t_TIMES = r'\*'
 t_DIVIDE = r'/'
 t_LPAREN = r'\('
 t_RPAREN = r'\)'
-t_NAME = r'[a-zA-Z_][a-zA-Z0-9_]*'
+t_NAME = r'[a-zA-Z\$_][a-zA-Z0-9\$_]*'
 
 # A function can be used if there is an associated action.
 # Write the matching regex in the docstring.
@@ -79,9 +82,15 @@ def p_assign_expression(p):
     '''
     p[0] = ('assign', p[1], p[2], p[3])
 
+def p_access_expression(p):
+    '''
+    expression : expression PERIOD NAME
+    '''
+    p[0] = ('access', p[1], p[3])
+
 def p_call_expression(p):
     '''
-    expression : NAME LPAREN argument_list RPAREN
+    expression : expression LPAREN argument_list RPAREN
     '''
     p[0] = ('call_expression', p[1], p[3])
 
