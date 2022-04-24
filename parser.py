@@ -3,7 +3,7 @@ from ply.yacc import yacc
 
 tokens = ( 'PLUS', 'MINUS', 'TIMES', 'DIVIDE', 'LPAREN', 'RPAREN',
            'NAME', 'NUMBER', 'ASSIGN', 'NEWLINE', 'COMMA', 'STRINGLITERAL',
-           'PERIOD'
+           'PERIOD', 'LBRACE', 'RBRACE'
           )
 
 # Ignored characters
@@ -19,6 +19,8 @@ t_TIMES = r'\*'
 t_DIVIDE = r'/'
 t_LPAREN = r'\('
 t_RPAREN = r'\)'
+t_LBRACE = r'\{'
+t_RBRACE = r'\}'
 t_NAME = r'[a-zA-Z\$_][a-zA-Z0-9\$_]*'
 
 # A function can be used if there is an associated action.
@@ -61,20 +63,30 @@ def p_statement_list_1(p):
     '''
     statement_list : statement
                    | statement NEWLINE
+                   | NEWLINE statement
+                   | NEWLINE statement NEWLINE
     '''
-    p[0] = ('statement_list', p[1])
+    statements = [a for a in p[1:] if a != '\n'][0]
+    p[0] = ('statement_list', statements)
 
 def p_statement_list_2(p):
     '''
     statement_list : statement NEWLINE statement_list
+                   | NEWLINE statement NEWLINE statement_list
     '''
-    p[0] = ('statement_list', p[1], p[3])
+    p[0] = ('statement_list', *[a for a in p[1:] if a != '\n'])
 
 def p_statement_expression(p):
     '''
     statement : expression
     '''
     p[0] = ('expression', p[1])
+
+def p_function_definition_expression(p):
+    '''
+    expression : LPAREN RPAREN LBRACE statement_list RBRACE
+    '''
+    p[0] = ('function_definition', p[4])
 
 def p_assign_expression(p):
     '''

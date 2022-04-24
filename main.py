@@ -60,11 +60,17 @@ class NativeCode(Code):
         return self.function(*args, **kwargs)
 
 class LimCode(Code):
-    def __init__(self, ast):
+    def __init__(self, ast, program):
         self.ast = ast
+        self.program = program
 
     def __call__(self, *args, **kwargs):
-        return self.function(*args, **kwargs)
+        self.program.scope.in_function = True
+        self.program.scope.function_scopes.append({})
+        value = self.program.stmt(self.ast)
+        self.program.scope.function_scopes.pop()
+        self.program.scope.in_function = False
+        return value
 
 binops = {
     '+': '$add',
@@ -78,8 +84,9 @@ class Scope:
         self.program = program
         self.builtins = {}
         self.file_scope = {}
-        self.function_scope = {}
+        self.function_scopes = []
         self.init_builtins()
+        self.in_function = False
 
     def init_builtins(self):
         self.builtins = {}
@@ -111,7 +118,7 @@ class Scope:
             '$sub': self.build_native_function(lambda x, y: x.value-y.value),
             '$mul': self.build_native_function(lambda x, y: x.value*y.value),
             '$div': self.build_native_function(lambda x, y: x.value/y.value),
-            '$string': self.build_native_function(lambda x: x.value),
+            '$string': self.build_native_function(lambda x: str(x.value)),
         }
         self.builtins["Integer"].prototype = self.builtins["Number"].prototype
         self.builtins["Float"].prototype = self.builtins["Number"].prototype
@@ -122,6 +129,7 @@ class Scope:
         }
         self.builtins["String"].prototype = {
             '$string': self.build_native_function(lambda x: x.value),
+            '$add': self.build_native_function(lambda x, y: x.value + self.program.to_string(y).value)
         }
         self.builtins["Dictionary"].prototype = {
             '$string': self.build_native_function(lambda x: str({ key.fields["$string"](key): value.fields["$string"](value) for key, value in x.value.items() })),
@@ -131,23 +139,30 @@ class Scope:
         }
 
     def __getitem__(self, name):
-        return self.builtins.get(name) or self.file_scope.get(name) or self.function_scope.get(name)
+        value = self.builtins.get(name) or self.file_scope.get(name) or self.in_function and self.function_scopes[-1].get(name)
+        if value is False or value is None:
+            raise KeyError(f"Cannot find '{name}' in scope")
+        return value
 
     def __setitem__(self, name, value):
         if name in self.builtins:
             self.builtins[name] = value
-        elif name in self.file_scope:
+        elif name in self.file_scope or not self.in_function:
             self.file_scope[name] = value
         else:
-            self.function_scope[name] = value
+            self.function_scopes[-1][name] = value
+
+    def __contains__(self, name):
+        return name in self.builtins or name in self.file_scope or self.in_function and name in self.function_scopes[-1]
 
 class Program:
-    def __init__(self):
+    def __init__(self, test):
         self.scope = Scope(self)
         self.scope.builtins["print"] = LimFunction(NativeCode(self.print), self.scope["Function"])
+        self.ast = parser.parse(text)
 
-    def run(self, ast):
-        return self.stmt(ast)
+    def run(self):
+        return self.stmt(self.ast)
 
     def binop(self, lhs, rhs, op):
         return self.getfield(lhs, binops[op])(rhs)
@@ -215,6 +230,8 @@ class Program:
             return self.build_lim_obj(ast[1])
         elif ast[0] == 'access':
             return self.getfield(self.expr(ast[1]), ast[2])
+        elif ast[0] == 'function_definition':
+            return LimFunction(LimCode(ast[1], self), self.scope["Function"])
         else:
             raise ValueError(f"Unknown expression {ast[0]}")
 
@@ -235,7 +252,6 @@ class Program:
 
 if __name__ == '__main__':
     with open(sys.argv[1], 'r') as f:
-        ast = parser.parse(f.read())
+        text = f.read()
 
-    program = Program()
-    program.run(ast)
+    Program(text).run()
