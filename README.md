@@ -4,7 +4,7 @@ A modern dynamic language
 # Goals
 - No wall between language features and user features
   - All natives should be completely patchable
-  - New language constructs can be added by users simply
+  - New language constructs can be simply added by users
 - Everything is an expression
 - Very simple scope everything is either file scoped or function scoped without sharing with inner functions
   - Closures cannot exist
@@ -23,7 +23,7 @@ The current implementation is written in python, expect the slowest language pos
 
  
 # Types
-Current types are Integer, Float, String, Array and Function. Dictionaries coming soon.
+Current types are Integer, Float, String, Array and Function. Dictionaries coming soon, structs later.
 Integers are BigInts, arbitrarely large.
 Floats are double precision.
 Strings support both double and single quotes.
@@ -38,16 +38,16 @@ my_function = (to_print) {
 my_function(my_string)
 ```
 # function scoping
-all variables are scoped to its closest enclosing function
+all variables are scoped to their closest enclosing function
 ```
 global_variable = 1
 my_func = () {
   my_func_variable = 2
   () {
-    global_variable = 2 //no issues
-    my_func_variable = 3 //breaks
+    print(global_variable) //no issues
+    print(my_func_variable) //breaks
     inner_vairable = 1
   }()
-  inner_variable = 2 // defines a new variable
+  print(inner_variable) // breaks
 }
 ```
