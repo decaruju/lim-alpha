@@ -1,5 +1,5 @@
-prot = Array.$prototype
-prot["first"] = () {
+Array.$prototype["first"] = () {
   this[0]
 }
+print(Array.$prototype)
 print([1, 2, 3, 4].first())

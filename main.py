@@ -120,6 +120,9 @@ class Scope:
             '$call': self.build_native_function(call_function),
             '$string': self.build_native_function(lambda x: 'LimFunction'),
         }
+        self.builtins["Type"].prototype = {
+            '$string': self.build_native_function(lambda x: x.name),
+        }
         self.builtins["Method"].prototype = { **self.builtins["Function"].prototype }
         self.builtins["Number"].prototype = {
             '$add': self.build_native_function(lambda x, y: x.value+y.value),
@@ -150,6 +153,7 @@ class Scope:
     def set_prototypes(self):
         for builtin in self.builtins.values():
             if isinstance(builtin, LimClass):
+                builtin.prototype['$class'] = builtin
                 builtin.fields['$prototype'] = self.program.build_lim_obj({ self.program.build_lim_obj(key): value for key, value in self.program.build_lim_obj(builtin.prototype).value.items() })
 
     def __getitem__(self, name):
@@ -222,8 +226,12 @@ class Program:
 
     def getfield(self, obj, field_name):
         if field_name not in obj.fields:
-            raise ValueError(obj.lim_class.name, field_name)
-        field = obj.fields[field_name]
+            if field_name in obj.lim_class.fields['$prototype'].value:
+                field = obj.lim_class.fields['$prototype'].value[field_name]
+            else:
+                raise ValueError(obj.lim_class.name, field_name)
+        else:
+            field = obj.fields[field_name]
         if field.lim_class.name == 'Function':
             method = self.scope['Method'].instanciate(field.value)
             method.this = obj
