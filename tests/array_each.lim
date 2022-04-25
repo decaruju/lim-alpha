@@ -1,0 +1,21 @@
+my_array = [1, 2, 3, 4]
+[1, 2, 3, 4].$each((item) {
+  print(item)
+})
+my_array.map = (fn) {
+rtn = []
+  this.$each((item) {
+    rtn.push(fn(item))
+  })
+  rtn
+}
+print(my_array.map((item) { item*2 }))
+my_array.reduce = (fn) {
+  rtn = this[0]
+  this.$each((item) {
+  print(rtn)
+    rtn = fn(item, rtn)
+  })
+  rtn
+}
+print(my_array.reduce((a, b) {a+b}))

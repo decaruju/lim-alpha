@@ -36,7 +36,7 @@ def t_NUMBER(t):
     return t
 
 def t_STRINGLITERAL(t):
-    r'(\'[\s\S]+\')|("[\s\S]+")'
+    r'(\'.+\')|(".+")'
     t.value = t.value[1:-1]
     return t
 
@@ -86,9 +86,28 @@ def p_statement_expression(p):
 
 def p_function_definition_expression(p):
     '''
-    expression : LPAREN RPAREN LBRACE statement_list RBRACE
+    expression : LPAREN argument_definitions RPAREN LBRACE statement_list RBRACE
     '''
-    p[0] = ('function_definition', p[4])
+    p[0] = ('function_definition', p[2], p[5])
+
+def p_argument_definitions_empty(p):
+    '''
+    argument_definitions :
+    '''
+    p[0] = ('argument_definitions', )
+
+def p_argument_definitions_one(p):
+    '''
+    argument_definitions : NAME
+    '''
+    p[0] = ('argument_definitions', p[1])
+
+def p_argument_definitions_multi(p):
+    '''
+    argument_definitions : NAME COMMA argument_definitions
+    '''
+    p[0] = ('argument_definitions', p[1], p[3])
+
 
 def p_assign_expression(p):
     '''
@@ -109,6 +128,12 @@ def p_access_expression(p):
     '''
     p[0] = ('access', p[1], p[3])
 
+def p_assign_member_expression(p):
+    '''
+    expression : expression PERIOD NAME ASSIGN expression
+    '''
+    p[0] = ('assign_member', p[1], p[3], p[5])
+
 def p_call_expression(p):
     '''
     expression : expression LPAREN argument_list RPAREN
@@ -119,6 +144,7 @@ def p_argument_list_empty(p):
     '''
     argument_list :
     '''
+    p[0] = ('argument_list', )
 
 def p_argument_list_1(p):
     '''
@@ -150,7 +176,7 @@ def p_array_content_empty(p):
     '''
     array_content :
     '''
-    p[0] = ('array_content')
+    p[0] = ('array_content', )
 
 def p_array_content_1(p):
     '''

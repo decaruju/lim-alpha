@@ -33,8 +33,6 @@ class LimClass(LimObj):
 class LimFunction(LimObj):
     def __init__(self, code, *args):
         super().__init__(*args)
-        if isinstance(code, LimClass):
-            breakpoint()
         self.code = code
 
     def __call__(self, *args, **kwargs):
@@ -44,6 +42,8 @@ class LimMethod(LimFunction):
     def __init__(self, this, *args):
         super().__init__(*args)
         self.this = this
+        if isinstance(self.code, LimCode):
+            self.code.args.insert(0, 'this')
         self.parent = None
 
     def __call__(self, *args):
@@ -60,16 +60,16 @@ class NativeCode(Code):
         return self.function(*args, **kwargs)
 
 class LimCode(Code):
-    def __init__(self, ast, program):
+    def __init__(self, ast, program, args):
         self.ast = ast
         self.program = program
+        self.args = args
 
     def __call__(self, *args, **kwargs):
-        self.program.scope.in_function = True
-        self.program.scope.function_scopes.append({})
+        last_scope = self.program.scope.function_scopes[-1] if self.program.scope.function_scopes else {}
+        self.program.scope.function_scopes.append({arg_name: arg_value for arg_name, arg_value in zip(self.args, args)})
         value = self.program.stmt(self.ast)
         self.program.scope.function_scopes.pop()
-        self.program.scope.in_function = False
         return value
 
 binops = {
@@ -86,7 +86,6 @@ class Scope:
         self.file_scope = {}
         self.function_scopes = []
         self.init_builtins()
-        self.in_function = False
 
     def init_builtins(self):
         self.builtins = {}
@@ -131,6 +130,7 @@ class Scope:
             '$string': self.build_native_function(self.array_to_string),
             'push': self.build_native_function(lambda x, y: x.value.append(y)),
             '$getitem': self.build_native_function(lambda x, y: x.value[y.value]),
+            '$each': self.build_native_function(lambda x, y: [y(i) for i in x.value] and x)
         }
         self.builtins["String"].prototype = {
             '$string': self.build_native_function(lambda x: x.value),
@@ -144,21 +144,25 @@ class Scope:
         }
 
     def __getitem__(self, name):
-        value = self.builtins.get(name) or self.file_scope.get(name) or self.in_function and self.function_scopes[-1].get(name)
-        if value is False or value is None:
-            raise KeyError(f"Cannot find '{name}' in scope")
-        return value
+        for scope in [self.builtins, self.file_scope, *self.function_scopes]:
+            if name in scope:
+                return scope[name]
+        raise KeyError(f"Cannot find '{name}' in scope")
 
     def __setitem__(self, name, value):
-        if name in self.builtins:
-            self.builtins[name] = value
-        elif name in self.file_scope or not self.in_function:
-            self.file_scope[name] = value
+        for scope in [self.builtins, self.file_scope, *self.function_scopes]:
+            if name in scope:
+                scope[name] = value
+                break
         else:
-            self.function_scopes[-1][name] = value
+            if self.function_scopes:
+                self.function_scopes[-1][name] = value
+            else:
+                self.file_scope[name] = value
+        return value
 
     def __contains__(self, name):
-        return name in self.builtins or name in self.file_scope or self.in_function and name in self.function_scopes[-1]
+        return name in self.builtins or name in self.file_scope or self.function_scopes and name in self.function_scopes[-1]
 
 class Program:
     def __init__(self, test):
@@ -181,6 +185,8 @@ class Program:
             return self.scope["String"].instanciate(obj)
         if isinstance(obj, list):
             return self.scope["Array"].instanciate(obj)
+        if obj is None:
+            return self.scope["Null"].instanciate(obj)
         if isinstance(obj, dict):
             return self.scope["Dictionary"].instanciate({self.build_lim_obj(key): self.build_lim_obj(value) for key, value in obj.items() })
         if isinstance(obj, LimObj):
@@ -195,6 +201,10 @@ class Program:
 
     def delitem(self, obj, key):
         return self.getfield(obj, "$delitem")(key)
+
+    def setfield(self, obj, field_name, value):
+        obj.fields[field_name] = value
+        return value
 
     def getfield(self, obj, field_name):
         if field_name not in obj.fields:
@@ -221,10 +231,9 @@ class Program:
         if len(ast) == 1:
             return []
         elif len(ast) == 2:
-            return [self.expr(ast[1])]
+            return [ast[1]]
         else:
-            return [self.expr(ast[1]), *self.build_array(ast[2])]
-
+            return [ast[1], *self.build_array(ast[2])]
 
     def expr(self, ast):
         if ast[0] == 'binop':
@@ -240,20 +249,22 @@ class Program:
             self.scope[ast[1]] = value
             return value
         elif ast[0] == 'call_expression':
-            arguments = self.parse_argument_list(ast[2]) if ast[2] else []
+            arguments = [self.expr(x) for x in self.build_array(ast[2])]
             return self.expr(ast[1])(*arguments)
         elif ast[0] == 'string':
             return self.build_lim_obj(ast[1])
         elif ast[0] == 'access':
             return self.getfield(self.expr(ast[1]), ast[2])
+        elif ast[0] == 'assign_member':
+            return self.setfield(self.expr(ast[1]), ast[2], self.expr(ast[3]))
         elif ast[0] == 'index':
             return self.getfield(self.expr(ast[1]), '$getitem')(self.expr(ast[2]))
         elif ast[0] == 'function_definition':
-            return LimFunction(LimCode(ast[1], self), self.scope["Function"])
+            return LimFunction(LimCode(ast[2], self, self.build_array(ast[1])), self.scope["Function"])
         elif ast[0] == 'array_expression':
             return self.build_lim_obj(self.expr(ast[1]))
         elif ast[0] == 'array_content':
-            return self.build_array(ast)
+            return [self.expr(x) for x in self.build_array(ast)]
         else:
             raise ValueError(f"Unknown expression {ast[0]}")
 
@@ -268,7 +279,7 @@ class Program:
         elif ast[0] == 'expression':
             return self.expr(ast[1])
         else:
-            print(ast)
+            breakpoint()
             raise ValueError(f"Unknown statement {ast[0]}")
 
 
