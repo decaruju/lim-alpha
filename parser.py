@@ -3,7 +3,7 @@ from ply.yacc import yacc
 
 tokens = ( 'PLUS', 'MINUS', 'TIMES', 'DIVIDE', 'LPAREN', 'RPAREN',
            'NAME', 'NUMBER', 'ASSIGN', 'NEWLINE', 'COMMA', 'STRINGLITERAL',
-           'PERIOD', 'LBRACE', 'RBRACE', 'LBRACKET', 'RBRACKET'
+           'PERIOD', 'LBRACE', 'RBRACE', 'LBRACKET', 'RBRACKET', 'COLON'
           )
 
 # Ignored characters
@@ -16,6 +16,7 @@ t_PERIOD = r'\.'
 t_COMMA = r','
 t_MINUS = r'-'
 t_TIMES = r'\*'
+t_COLON = r'\:'
 t_DIVIDE = r'/'
 t_LPAREN = r'\('
 t_RPAREN = r'\)'
@@ -36,7 +37,7 @@ def t_NUMBER(t):
     return t
 
 def t_STRINGLITERAL(t):
-    r'(\'.+\')|(".+")'
+    r'(\'(\\.|[^\'\\])*\')|("(\\.|[^"\\])*")'
     t.value = t.value[1:-1]
     return t
 
@@ -121,6 +122,12 @@ def p_index_expression(p):
     '''
     p[0] = ('index', p[1], p[3])
 
+def p_assign_index_expression(p):
+    '''
+    expression : expression LBRACKET expression RBRACKET ASSIGN expression
+    '''
+    p[0] = ('assign_index', p[1], p[3], p[6])
+
 
 def p_access_expression(p):
     '''
@@ -165,6 +172,31 @@ def p_expression(p):
                | term MINUS expression
     '''
     p[0] = ('binop', p[2], p[1], p[3])
+
+def p_dictionary_expression(p):
+    '''
+    expression : LBRACE dictionary_content RBRACE
+    '''
+    p[0] = ('dictionary_expression', p[2])
+
+def p_dictionary_content_zero(p):
+    '''
+    dictionary_content :
+    '''
+    p[0] = ('dictionary_content', )
+
+def p_dictionary_content_one(p):
+    '''
+    dictionary_content : expression COLON expression
+    '''
+    p[0] = ('dictionary_content', (p[1], p[3]))
+
+def p_dictionary_content_multi(p):
+    '''
+    dictionary_content : expression COLON expression COMMA dictionary_content
+    '''
+    p[0] = ('dictionary_content', (p[1], p[3]), p[5])
+
 
 def p_array_expression(p):
     '''

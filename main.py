@@ -6,11 +6,16 @@ class LimObj:
         self.lim_class = lim_class
         self.fields = {}
 
+    def __repr__(self):
+        return "LimObj" + str(getattr(self, 'value', ''))
+
     def __hash__(self):
         return hash(self.value)
 
     def __eq__(self, rhs):
-        return self.value == rhs.value
+        if isinstance(rhs, LimObj):
+            return self.value == rhs.value
+        return self.value == rhs
 
 class LimClass(LimObj):
     def __init__(self, name, parent_class, *args, prototype=None):
@@ -27,27 +32,21 @@ class LimClass(LimObj):
     def instanciate(self, value):
         obj = LimObj(self)
         obj.value = value
-        obj.fields = {**self.prototype}
+        if self.fields.get('$prototype'):
+            obj.fields = self.fields.get('$prototype').value
+        else:
+            obj.fields = self.prototype
+
         return obj
 
-class LimFunction(LimObj):
-    def __init__(self, code, *args):
-        super().__init__(*args)
-        self.code = code
-
-    def __call__(self, *args, **kwargs):
-        return self.code(*args, **kwargs)
-
-class LimMethod(LimFunction):
-    def __init__(self, this, *args):
-        super().__init__(*args)
-        self.this = this
-        if isinstance(self.code, LimCode):
-            self.code.args.insert(0, 'this')
-        self.parent = None
-
-    def __call__(self, *args):
-        return super().__call__(self.this, *args)
+def call_function(func, *args):
+    # if isinstance(func.code, LimCode) and isinstance(func, LimMethod):
+    #     func.code.args.insert(0, 'this')
+    if func.lim_class.name == 'Method':
+        args = [func.this, *args]
+    if isinstance(func.value, LimCode):
+        func.value.args.insert(0, 'this')
+    return func.value(*args)
 
 class Code:
     pass
@@ -109,7 +108,7 @@ class Scope:
         self.build_prototypes()
 
     def build_native_function(self, fn):
-        return LimFunction(NativeCode(lambda *arg: self.program.build_lim_obj(fn(*arg))), self.builtins["Function"])
+        return self.builtins["Function"].instanciate(NativeCode(lambda *arg: self.program.build_lim_obj(fn(*arg))))
 
     def array_to_string(self, array):
         elements = ', '.join([item.fields["$string"](item).value for item in array.value])
@@ -117,6 +116,11 @@ class Scope:
 
 
     def build_prototypes(self):
+        self.builtins["Function"].prototype = {
+            '$call': self.build_native_function(call_function),
+            '$string': self.build_native_function(lambda x: 'LimFunction'),
+        }
+        self.builtins["Method"].prototype = { **self.builtins["Function"].prototype }
         self.builtins["Number"].prototype = {
             '$add': self.build_native_function(lambda x, y: x.value+y.value),
             '$sub': self.build_native_function(lambda x, y: x.value-y.value),
@@ -137,11 +141,16 @@ class Scope:
             '$add': self.build_native_function(lambda x, y: x.value + self.program.to_string(y).value)
         }
         self.builtins["Dictionary"].prototype = {
-            '$string': self.build_native_function(lambda x: str({ key.fields["$string"](key): value.fields["$string"](value) for key, value in x.value.items() })),
+            '$string': self.build_native_function(lambda x: str({ self.program.to_string(key).value: self.program.to_string(value).value for key, value in x.value.items() })),
             '$getitem': self.build_native_function(lambda x, y: x.value[y]),
             '$setitem': self.build_native_function(lambda x, y, z: x.value.__setitem__(y, z)),
             '$delitem': self.build_native_function(lambda x, y: x.value.__delitem__(y)),
         }
+
+    def set_prototypes(self):
+        for builtin in self.builtins.values():
+            if isinstance(builtin, LimClass):
+                builtin.fields['$prototype'] = self.program.build_lim_obj({ self.program.build_lim_obj(key): value for key, value in self.program.build_lim_obj(builtin.prototype).value.items() })
 
     def __getitem__(self, name):
         for scope in [self.builtins, self.file_scope, *self.function_scopes]:
@@ -165,16 +174,17 @@ class Scope:
         return name in self.builtins or name in self.file_scope or self.function_scopes and name in self.function_scopes[-1]
 
 class Program:
-    def __init__(self, test):
+    def __init__(self):
         self.scope = Scope(self)
-        self.scope.builtins["print"] = LimFunction(NativeCode(self.print), self.scope["Function"])
-        self.ast = parser.parse(text)
+        self.scope.set_prototypes()
+        self.scope.builtins["print"] = self.scope['Function'].instanciate(NativeCode(self.print))
 
-    def run(self):
+    def run(self, text):
+        self.ast = parser.parse(text)
         return self.stmt(self.ast)
 
     def binop(self, lhs, rhs, op):
-        return self.getfield(lhs, binops[op])(rhs)
+        return self.call(self.getfield(lhs, binops[op]), rhs)
 
     def build_lim_obj(self, obj):
         if isinstance(obj, int):
@@ -203,19 +213,25 @@ class Program:
         return self.getfield(obj, "$delitem")(key)
 
     def setfield(self, obj, field_name, value):
+        print("set", obj, field_name, value)
         obj.fields[field_name] = value
         return value
+
+    def call(self, obj, *args):
+        return self.getfield(obj, '$call').value(obj, *args)
 
     def getfield(self, obj, field_name):
         if field_name not in obj.fields:
             raise ValueError(obj.lim_class.name, field_name)
         field = obj.fields[field_name]
-        if isinstance(field, LimFunction):
-            return LimMethod(obj, field.code, self.scope["Function"])
+        if field.lim_class.name == 'Function':
+            method = self.scope['Method'].instanciate(field.value)
+            method.this = obj
+            return method
         return field
 
     def to_string(self, obj):
-        return self.getfield(obj, "$string")()
+        return self.call(self.getfield(obj, "$string"))
 
     def print(self, arg):
         print(self.to_string(arg).value)
@@ -250,7 +266,7 @@ class Program:
             return value
         elif ast[0] == 'call_expression':
             arguments = [self.expr(x) for x in self.build_array(ast[2])]
-            return self.expr(ast[1])(*arguments)
+            return self.call(self.expr(ast[1]), *arguments)
         elif ast[0] == 'string':
             return self.build_lim_obj(ast[1])
         elif ast[0] == 'access':
@@ -258,13 +274,21 @@ class Program:
         elif ast[0] == 'assign_member':
             return self.setfield(self.expr(ast[1]), ast[2], self.expr(ast[3]))
         elif ast[0] == 'index':
-            return self.getfield(self.expr(ast[1]), '$getitem')(self.expr(ast[2]))
+            return self.call(self.getfield(self.expr(ast[1]), '$getitem'), self.expr(ast[2]))
+        elif ast[0] == 'assign_index':
+            print(ast)
+            return self.call(self.getfield(self.expr(ast[1]), '$setitem'), self.expr(ast[2]), self.expr(ast[3]))
         elif ast[0] == 'function_definition':
-            return LimFunction(LimCode(ast[2], self, self.build_array(ast[1])), self.scope["Function"])
+            return self.scope['Function'].instanciate(LimCode(ast[2], self, self.build_array(ast[1])))
         elif ast[0] == 'array_expression':
             return self.build_lim_obj(self.expr(ast[1]))
         elif ast[0] == 'array_content':
             return [self.expr(x) for x in self.build_array(ast)]
+        elif ast[0] == 'dictionary_expression':
+            return self.build_lim_obj(self.expr(ast[1]))
+        elif ast[0] == 'dictionary_content':
+            return {self.expr(elem[0]): self.expr(elem[1]) for elem in self.build_array(ast)}
+
         else:
             raise ValueError(f"Unknown expression {ast[0]}")
 
@@ -282,9 +306,10 @@ class Program:
             breakpoint()
             raise ValueError(f"Unknown statement {ast[0]}")
 
+program = Program()
 
 if __name__ == '__main__':
     with open(sys.argv[1], 'r') as f:
         text = f.read()
 
-    Program(text).run()
+    program.run(text)

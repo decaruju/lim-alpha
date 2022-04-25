@@ -1,0 +1,5 @@
+prot = Array.$prototype
+prot["first"] = () {
+  this[0]
+}
+print([1, 2, 3, 4].first())

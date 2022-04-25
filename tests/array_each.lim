@@ -19,3 +19,7 @@ my_array.reduce = (fn) {
   rtn
 }
 print(my_array.reduce((a, b) {a+b}))
+my_array.sum = () {
+  this.reduce((a, b) {a+b})
+}
+print(my_array.sum())
