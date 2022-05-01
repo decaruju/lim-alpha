@@ -209,4 +209,16 @@ class Program:
         return arg
 
 program = Program()
+<<<<<<< Updated upstream
 program.run()
+=======
+
+if __name__ == '__main__':
+    with open(sys.argv[1], 'r') as f:
+        text = f.read()
+
+    text = '\n'.join(clean_line for line in text.split('\n') if (clean_line := line.strip()))
+    print(text)
+
+    program.run(text)
+>>>>>>> Stashed changes
