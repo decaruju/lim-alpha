@@ -42,11 +42,16 @@ class LimClass(LimObj):
 def call_function(func, *args):
     # if isinstance(func.code, LimCode) and isinstance(func, LimMethod):
     #     func.code.args.insert(0, 'this')
+    this_added = False
     if func.lim_class.name == 'Method':
         args = [func.this, *args]
-    if isinstance(func.value, LimCode):
-        func.value.args.insert(0, 'this')
-    return func.value(*args)
+        if isinstance(func.value, LimCode):
+            func.value.args.insert(0, 'this')
+            this_added = True
+    value = func.value(*args)
+    if this_added:
+        func.value.args.pop(0)
+    return value
 
 class Code:
     pass
@@ -65,10 +70,11 @@ class LimCode(Code):
         self.args = args
 
     def __call__(self, *args, **kwargs):
-        last_scope = self.program.scope.function_scopes[-1] if self.program.scope.function_scopes else {}
+        old_function_scopes = self.program.scope.function_scopes
+        self.program.scope.function_scopes = [*self.scopes]
         self.program.scope.function_scopes.append({arg_name: arg_value for arg_name, arg_value in zip(self.args, args)})
         value = self.program.stmt(self.ast)
-        self.program.scope.function_scopes.pop()
+        self.program.scope.function_scopes = old_function_scopes
         return value
 
 binops = {
@@ -95,6 +101,7 @@ class Scope:
 
         self.builtins["Struct"] = LimClass("Struct", lim_type, lim_type)
         self.builtins["Null"] = LimClass("Null", lim_type, lim_type)
+        self.builtins["Bool"] = LimClass("Bool", lim_type, lim_type)
         self.builtins["Function"] = LimClass("Function", lim_type, lim_type)
         self.builtins["Method"] = LimClass("Method", self.builtins["Function"], lim_type)
         self.builtins["Number"] = LimClass("Number", lim_type, lim_type)
@@ -106,14 +113,14 @@ class Scope:
 
         self.builtins["null"] = LimObj(self.builtins["Null"])
         self.build_prototypes()
+        self.build_constants()
 
     def build_native_function(self, fn):
         return self.builtins["Function"].instanciate(NativeCode(lambda *arg: self.program.build_lim_obj(fn(*arg))))
 
     def array_to_string(self, array):
-        elements = ', '.join([item.fields["$string"](item).value for item in array.value])
+        elements = ', '.join([self.program.to_string(item).value for item in array.value])
         return f'[{elements}]'
-
 
     def build_prototypes(self):
         self.builtins["Function"].prototype = {
@@ -130,6 +137,7 @@ class Scope:
             '$mul': self.build_native_function(lambda x, y: x.value*y.value),
             '$div': self.build_native_function(lambda x, y: x.value/y.value),
             '$string': self.build_native_function(lambda x: str(x.value)),
+            '$bool': self.build_native_function(lambda x: True)
         }
         self.builtins["Integer"].prototype = self.builtins["Number"].prototype
         self.builtins["Float"].prototype = self.builtins["Number"].prototype
@@ -137,11 +145,18 @@ class Scope:
             '$string': self.build_native_function(self.array_to_string),
             'push': self.build_native_function(lambda x, y: x.value.append(y)),
             '$getitem': self.build_native_function(lambda x, y: x.value[y.value]),
-            '$each': self.build_native_function(lambda x, y: [y(i) for i in x.value] and x)
+            '$each': self.build_native_function(lambda x, y: [self.program.call(y, i) for i in x.value] and x)
         }
         self.builtins["String"].prototype = {
             '$string': self.build_native_function(lambda x: x.value),
             '$add': self.build_native_function(lambda x, y: x.value + self.program.to_string(y).value)
+        }
+        self.builtins["Null"].prototype = {
+            '$string': self.build_native_function(lambda x: "null"),
+        }
+        self.builtins["Bool"].prototype = {
+            '$string': self.build_native_function(lambda x: str(x.value)),
+            '$bool': self.build_native_function(lambda x: x),
         }
         self.builtins["Dictionary"].prototype = {
             '$string': self.build_native_function(lambda x: str({ self.program.to_string(key).value: self.program.to_string(value).value for key, value in x.value.items() })),
@@ -149,6 +164,11 @@ class Scope:
             '$setitem': self.build_native_function(lambda x, y, z: x.value.__setitem__(y, z)),
             '$delitem': self.build_native_function(lambda x, y: x.value.__delitem__(y)),
         }
+
+    def build_constants(self):
+        self.builtins['null'] = self.builtins['Null'].instanciate(None)
+        self.builtins['true'] = self.builtins['Bool'].instanciate(True)
+        self.builtins['false'] = self.builtins['Bool'].instanciate(False)
 
     def set_prototypes(self):
         for builtin in self.builtins.values():
@@ -217,7 +237,6 @@ class Program:
         return self.getfield(obj, "$delitem")(key)
 
     def setfield(self, obj, field_name, value):
-        print("set", obj, field_name, value)
         obj.fields[field_name] = value
         return value
 
@@ -229,6 +248,7 @@ class Program:
             if field_name in obj.lim_class.fields['$prototype'].value:
                 field = obj.lim_class.fields['$prototype'].value[field_name]
             else:
+                breakpoint()
                 raise ValueError(obj.lim_class.name, field_name)
         else:
             field = obj.fields[field_name]
@@ -240,6 +260,9 @@ class Program:
 
     def to_string(self, obj):
         return self.call(self.getfield(obj, "$string"))
+
+    def to_bool(self, obj):
+        return self.call(self.getfield(obj, "$bool"))
 
     def print(self, arg):
         print(self.to_string(arg).value)
@@ -284,10 +307,11 @@ class Program:
         elif ast[0] == 'index':
             return self.call(self.getfield(self.expr(ast[1]), '$getitem'), self.expr(ast[2]))
         elif ast[0] == 'assign_index':
-            print(ast)
             return self.call(self.getfield(self.expr(ast[1]), '$setitem'), self.expr(ast[2]), self.expr(ast[3]))
         elif ast[0] == 'function_definition':
-            return self.scope['Function'].instanciate(LimCode(ast[2], self, self.build_array(ast[1])))
+            function = self.scope['Function'].instanciate(LimCode(ast[2], self, self.build_array(ast[1])))
+            function.value.scopes = [*self.scope.function_scopes]
+            return function
         elif ast[0] == 'array_expression':
             return self.build_lim_obj(self.expr(ast[1]))
         elif ast[0] == 'array_content':
@@ -296,6 +320,25 @@ class Program:
             return self.build_lim_obj(self.expr(ast[1]))
         elif ast[0] == 'dictionary_content':
             return {self.expr(elem[0]): self.expr(elem[1]) for elem in self.build_array(ast)}
+        elif ast[0] == 'if_expression':
+            if_clause = ast[1]
+            if self.to_bool(self.expr(if_clause[1])).value:
+                return self.stmt(if_clause[2])
+            else_if_clause = ast[2]
+            while True:
+                if len(else_if_clause) > 1:
+                    if self.to_bool(self.expr(else_if_clause[1][1])).value:
+                        return self.stmt(else_if_clause[1][2])
+                    elif len(else_if_clause) > 2:
+                        else_if_clause = else_if_clause[2]
+                    else:
+                        break
+                else:
+                    break
+            else_clause = ast[3]
+            if len(else_clause) > 1:
+                return self.stmt(else_clause[1])
+            return self.scope['null']
 
         else:
             raise ValueError(f"Unknown expression {ast[0]}")
@@ -304,20 +347,23 @@ class Program:
         if ast[0] == 'program':
             return self.stmt(ast[1])
         elif ast[0] == 'statement_list':
+            if len(ast) == 1:
+                return self.scope["Null"].instanciate(None)
             value = self.stmt(ast[1])
-            if len(ast) > 2:
+            if len(ast) > 2 and len(ast[2]) > 1:
                 value = self.stmt(ast[2])
             return value
         elif ast[0] == 'expression':
             return self.expr(ast[1])
         else:
-            breakpoint()
-            raise ValueError(f"Unknown statement {ast[0]}")
+            raise ValueError(f"Unknown statement {ast[0]!r}")
 
 program = Program()
 
 if __name__ == '__main__':
     with open(sys.argv[1], 'r') as f:
         text = f.read()
+
+    text = '\n'.join(clean_line for line in text.split("\n") if (clean_line := line.strip()))
 
     program.run(text)

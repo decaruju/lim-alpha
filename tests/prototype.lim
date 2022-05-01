@@ -1,5 +1,5 @@
 Array.$prototype["first"] = () {
-  this[0]
+this[0]
 }
 print(Array.$prototype)
 print([1, 2, 3, 4].first())

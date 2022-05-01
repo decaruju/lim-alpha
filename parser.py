@@ -1,10 +1,16 @@
 from ply.lex import lex
 from ply.yacc import yacc
 
+reserved = {
+    'if': 'IF',
+    'else': 'ELSE',
+    'elseif': 'ELSEIF',
+}
+
 tokens = ( 'PLUS', 'MINUS', 'TIMES', 'DIVIDE', 'LPAREN', 'RPAREN',
            'NAME', 'NUMBER', 'ASSIGN', 'NEWLINE', 'COMMA', 'STRINGLITERAL',
-           'PERIOD', 'LBRACE', 'RBRACE', 'LBRACKET', 'RBRACKET', 'COLON'
-          )
+           'PERIOD', 'LBRACE', 'RBRACE', 'LBRACKET', 'RBRACKET', 'COLON',
+           *reserved.values())
 
 # Ignored characters
 t_ignore = ' \t'
@@ -14,6 +20,7 @@ t_ASSIGN = r'\='
 t_PLUS = r'\+'
 t_PERIOD = r'\.'
 t_COMMA = r','
+t_IF = r'if'
 t_MINUS = r'-'
 t_TIMES = r'\*'
 t_COLON = r'\:'
@@ -24,10 +31,16 @@ t_LBRACE = r'\{'
 t_RBRACE = r'\}'
 t_LBRACKET = r'\['
 t_RBRACKET = r'\]'
-t_NAME = r'[a-zA-Z\$_][a-zA-Z0-9\$_]*'
 
 # A function can be used if there is an associated action.
 # Write the matching regex in the docstring.
+
+def t_NAME(t):
+    r'[a-zA-Z\$_][a-zA-Z0-9\$_]*'
+    if t.value in reserved:
+        t.type = reserved[t.value]
+    return t
+
 def t_NUMBER(t):
     r'(\d+\.\d+)|(\d+)'
     if '.' in t.value:
@@ -62,22 +75,35 @@ def p_program(p):
     '''
     p[0] = ('program', p[1])
 
+def p_statement_list_newline(p):
+    '''
+    statement_list : NEWLINE statement_list
+    '''
+    p[0] = p[2]
+
+def p_statement_list_newline_after(p):
+    '''
+    statement_list : statement_list NEWLINE
+    '''
+    p[0] = p[1]
+
 def p_statement_list_1(p):
     '''
     statement_list : statement
-                   | statement NEWLINE
-                   | NEWLINE statement
-                   | NEWLINE statement NEWLINE
     '''
-    statements = [a for a in p[1:] if a != '\n'][0]
-    p[0] = ('statement_list', statements)
+    p[0] = ('statement_list', p[1])
+
+def p_statement_list_0(p):
+    '''
+    statement_list :
+    '''
+    p[0] = ('statement_list', )
 
 def p_statement_list_2(p):
     '''
     statement_list : statement NEWLINE statement_list
-                   | NEWLINE statement NEWLINE statement_list
     '''
-    p[0] = ('statement_list', *[a for a in p[1:] if a != '\n'])
+    p[0] = ('statement_list', p[1], p[3])
 
 def p_statement_expression(p):
     '''
@@ -108,6 +134,49 @@ def p_argument_definitions_multi(p):
     argument_definitions : NAME COMMA argument_definitions
     '''
     p[0] = ('argument_definitions', p[1], p[3])
+
+def p_if_expression(p):
+    '''
+    expression : if_clause else_if_clauses else_clause
+    '''
+    p[0] = ('if_expression', p[1], p[2], p[3])
+
+def p_if_clause(p):
+    '''
+    if_clause : IF expression LBRACE statement_list RBRACE
+    '''
+    p[0] = ('if_clause', p[2], p[4])
+
+def p_else_if_clauses_empty(p):
+    '''
+    else_if_clauses :
+    '''
+    p[0] = ('else_if_clauses', )
+
+
+def p_else_if_clauses_many(p):
+    '''
+    else_if_clauses : else_if_clause else_if_clauses
+    '''
+    p[0] = ('else_if_clauses', p[1], p[2])
+
+def p_else_if_clause(p):
+    '''
+    else_if_clause : ELSEIF expression LBRACE statement_list RBRACE
+    '''
+    p[0] = ('else_if_clause', p[2], p[4])
+
+def p_else_clause_empty(p):
+    '''
+    else_clause :
+    '''
+    p[0] = ('else_clause', )
+
+def p_else_clause(p):
+    '''
+    else_clause : ELSE LBRACE statement_list RBRACE
+    '''
+    p[0] = ('else_clause', p[3])
 
 
 def p_assign_expression(p):
@@ -274,7 +343,6 @@ def p_factor_grouped(p):
     p[0] = ('grouped', p[2])
 
 def p_error(p):
-    print(p)
-    print(f'Syntax error at {p.value!r}')
+    print(f'Syntax error at {p!r}')
 
 parser = yacc()
