@@ -18,9 +18,9 @@ t_ignore = ' \t'
 # Token matching rules are written as regexs
 t_ASSIGN = r'\='
 t_PLUS = r'\+'
+t_ELSE = r'else'
 t_PERIOD = r'\.'
 t_COMMA = r','
-t_IF = r'if'
 t_MINUS = r'-'
 t_TIMES = r'\*'
 t_COLON = r'\:'
@@ -342,7 +342,7 @@ def p_factor_grouped(p):
     '''
     p[0] = ('grouped', p[2])
 
-def p_error(p):
-    print(f'Syntax error at {p!r}')
+def p_error(err):
+    print(f'Syntax error at {err!r}')
 
 parser = yacc()
