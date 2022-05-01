@@ -17,7 +17,6 @@ t_ignore = ' \t'
 
 # Token matching rules are written as regexs
 t_ASSIGN = r'\='
-t_EQUALS = r'\=='
 t_PLUS = r'\+'
 t_PERIOD = r'\.'
 t_COMMA = r','
@@ -93,21 +92,6 @@ def p_statement_list_1(p):
     statement_list : statement
     '''
     p[0] = ('statement_list', p[1])
-<<<<<<< Updated upstream
-=======
-
-def p_statement_list_n_before(p):
-    '''
-    statement_list : NEWLINE statement_list
-    '''
-    p[0] = ('statement_list', p[2])
-
-def p_statement_list_n_after(p):
-    '''
-    statement_list : statement_list NEWLINE
-    '''
-    p[0] = ('statement_list', p[1])
->>>>>>> Stashed changes
 
 def p_statement_list_0(p):
     '''
