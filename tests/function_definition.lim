@@ -1,0 +1,9 @@
+x = 0
+foo = () {
+  x = 1
+  () {
+    "hello world" + x
+  }
+}
+print(foo()())
+

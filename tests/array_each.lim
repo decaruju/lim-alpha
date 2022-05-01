@@ -1,0 +1,14 @@
+my_array = [1, 2, 3, 4]
+my_array.reduce = (fn) {
+  rtn = this[0]
+  this.$each((item) {
+  print(rtn)
+    rtn = fn(item, rtn)
+  })
+  rtn
+}
+print(my_array.reduce((a, b) {a+b}))
+my_array.sum = () {
+  this.reduce((a, b) {a+b})
+}
+print(my_array.sum())
